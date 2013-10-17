@@ -1,0 +1,4 @@
+name = Check Relation Node/User
+description = Runs against node table looking for users not registered in the system anymore.
+core = 7.x
+package = Custom

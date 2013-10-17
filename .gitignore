@@ -1,0 +1,17 @@
+# OS or Editor folders
+.DS_Store
+.sass-cache
+.cache
+.idea
+.project
+.settings
+.tmproj
+nbproject
+Thumbs.db
+
+# Folders to ignore
+.hg
+.svn
+.CVS
+cgi-bin
+FirePHPCore

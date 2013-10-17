@@ -1,0 +1,7 @@
+<?php
+/**
+ * Implements hook_menu().
+ */
+function check_relation_node_users_menu() {
+  //
+}
