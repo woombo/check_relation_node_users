@@ -3,5 +3,207 @@
  * Implements hook_menu().
  */
 function check_relation_node_users_menu() {
-  //
+  $items = array();
+  $items['admin/people/check-relation-node-users'] = array(
+    'title' => 'Check relation node/user',
+    'description' => 'Runs against node table looking for users not registered in the system anymore.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('check_relation_node_users_admin'),
+    'access arguments' => array('administer'),
+  );
+  return $items;
+}
+
+/**
+ * Admin interface.
+ */
+function check_relation_node_users_admin($form, &$form_state) {
+
+  // Check if a feedback message needs to be displayed.
+  // if (($mesage = _crnu_display_message()) && !empty($mesage)) {
+  //   drupal_set_message($mesage);
+  // }
+
+  // Query users.
+  $query_users = _crnu_query_users();
+
+  if (!empty($query_users)) {
+    // Set variables.
+    $users_id_list = array();
+    $rows = array();
+    $return_data = '';
+
+    // Loop through.
+    foreach ($query_users as $user_info) {
+      $user_id = $user_info->uid;
+      $users[$user_id] = $user_info->name;
+      $users_id_list[] = $user_id;
+    }
+
+    // Set filter option where users can choose the user who will be assigned as
+    // owner to the nodes listed bellow.
+    $form['choose_user'] = array(
+      '#type' => 'fieldset',
+      // '#title' => t('Select an user to be assigned to the nodes.'),
+      '#prefix' => t('<h3>Select an user to be assigned to the nodes.</h3>'),
+    );
+    $form['choose_user']['uid'] = array(
+      '#type' => 'select',
+      '#options' => $users,
+      '#default_value' => 1
+    );
+  }
+
+  // Convert $users_id_list array to string type.
+  $users_id_list = implode(',', $users_id_list);
+
+  // Query node types not assigned to none of the valid users.
+  $query_node_types = _crnu_query_node_types($users_id_list);
+
+  // Initialize vertical tabs.
+  $form['vertical_tabs'] = array(
+    '#type' => 'vertical_tabs',
+    '#prefix' => t('<h3>Select all items to be assigned to the selected user.</h3>'),
+  );
+
+  // Query nodes only if $query_node_types has results on it.
+  if (isset($query_node_types) && !empty($query_node_types)) {
+    foreach ($query_node_types as $node_type) {
+      // Set/Reset variables.
+      $type_type = $node_type->type;
+      $type_name = $node_type->name;
+      $tab_name = 'tab_'. $type_type;
+      $options = array();
+
+      // Query nodes.
+      $query_nodes = _crnu_query_load_nodes($type_type, $users_id_list);
+      $query_nodes_fetch = $query_nodes->fetchAll();
+      $query_nodes_count = $query_nodes->rowCount();
+
+      // Set tab wrapper.
+      $form[$tab_name] = array(
+        '#type' => 'fieldset',
+        '#title' => $type_name .' (<strong>'. $query_nodes_count .'</strong> items)',
+        '#collapsible' => TRUE,
+        '#group' => 'vertical_tabs',
+      );
+
+      // If available, table all data.
+      if ($query_nodes_count > 0) {
+        foreach ($query_nodes_fetch as $node) {
+          $options[$node->nid] = array(
+            'title' => array(
+              'data' => array(
+                '#type' => 'link',
+                '#title' => $node->title,
+                '#href' => 'node/' . $node->nid,
+                '#options' => array(),
+              ),
+            ),
+            'nid' => $node->nid,
+            'uid' => $node->uid,
+          );
+        }
+
+        // Create individual tabs for every content type.
+        $form[$tab_name]['list_items'] = array(
+          '#type' => 'tableselect',
+          '#header' => array(
+            'title' => array('data' => t('Title'), 'field' => 'n.title'),
+            'nid' => array('data' => t('Node ID'), 'field' => 'n.nid'),
+            'uid' => array('data' => t('User ID'), 'field' => 'n.uid'),
+          ),
+          '#options' => $options,
+          '#empty' => t('No content available.'),
+        );
+      }
+    }
+  }
+
+  // Custom submit.
+  $form['#submit'][] = 'check_relation_node_users_admin_submit';
+
+  return system_settings_form($form);
+}
+
+/**
+ * Implements hook_validate().
+ */
+function check_relation_node_users_admin_validate($form, &$form_state) {
+  // Validate user.
+  if (_crnu_is_valid_user($form_state['values']['uid']) == FALSE) {
+    form_set_error('uid', 'Please select a valid user.');
+  }
+}
+
+/**
+ * Custom submit.
+ */
+function check_relation_node_users_admin_submit($form, &$form_state) {
+  // Submit
+}
+
+/**
+ * Helper function - Display top message.
+ *
+ * @return html
+ */
+function _crnu_display_message() {
+  return '';
+}
+
+/**
+ * Helper function - Query all users.
+ * Load all users from database.
+ *
+ * @return array
+ */
+function _crnu_query_users() {
+  return db_query('SELECT uid, name FROM {users} ORDER BY uid')->fetchAll();
+}
+
+/**
+ * Helper function - Check if user is available in database.
+ *
+ * @param int $uid
+ * @return bolean
+ */
+function _crnu_is_valid_user($uid = NULL) {
+  return db_query('SELECT uid FROM {users} WHERE uid > 0 && uid = :uid', array(':uid' => $uid))->rowCount();
+}
+
+/**
+ * Helper function - Query node types.
+ * Load and group all node types from database excluding nodes created by valid
+ * users or users in database.
+ *
+ * @param  string|array $users_list
+ * @return array
+ */
+function _crnu_query_node_types($users_list = NULL) {
+  if (!empty($users_list) && is_array($users_list)) {
+    $users_list = implode(',', $users_list);
+  }
+  return db_query('SELECT n.type, nt.name FROM {node} as n LEFT JOIN {node_type} as nt ON n.type = nt.type  WHERE (uid NOT IN (:users_list)) GROUP BY type ORDER BY type', array(':users_list' => $users_list))->fetchAll();
+}
+
+/**
+ * Helper function - Query nodes.
+ * Load and group all node types from database excluding nodes created by valid
+ *
+ * @param  string $node_type
+ * @param  string|array $users_list
+ *
+ * @return array
+ */
+function _crnu_query_load_nodes($node_type = NULL, $users_list = NULL) {
+  if (empty($node_type)) {
+    return;
+  }
+
+  if (!empty($users_list) && is_array($users_list)) {
+    $users_list = implode(',', $users_list);
+  }
+
+  return db_query('SELECT nid, type, title, uid FROM {node} WHERE (uid NOT IN (:users_list)) AND (type = :type) ORDER BY uid, title', array(':users_list' => $users_list, ':type' => $node_type));
 }
